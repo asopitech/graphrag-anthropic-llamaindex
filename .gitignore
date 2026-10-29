@@ -6,7 +6,10 @@ __pycache__/
 # Environments
 .env
 .venv
-config.yaml
+config/config.yaml
+/claude_home
+/config.yaml
+!scripts/demo_dataset/config.yaml
 
 # Poetry
 poetry.lock
@@ -14,9 +17,11 @@ poetry.lock
 
 data
 graphrag_output
+/alopexdb/
 
 .claude
 .gemini
 .serena
 
 CLAUDE.md
+demo_output

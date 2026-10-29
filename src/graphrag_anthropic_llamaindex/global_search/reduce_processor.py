@@ -7,8 +7,9 @@ from typing import List, Dict, Any, Optional
 import json
 
 from llama_index.core import Settings
+from graphrag_anthropic_llamaindex.llm_utils import get_configured_llm
 from llama_index.llms.anthropic import Anthropic
-from llama_index.llms.bedrock import Bedrock
+from llama_index.llms.bedrock_converse import BedrockConverse
 
 from .models import MapResult, KeyPoint, GlobalSearchResult, TraceabilityInfo
 from .prompts import REDUCE_SYSTEM_PROMPT, REDUCE_USER_PROMPT
@@ -22,27 +23,31 @@ class ReduceProcessor:
     def __init__(
         self,
         llm_config: Dict[str, Any],
-        response_type: str = "multiple paragraphs"
+        response_type: str = "multiple paragraphs",
+        max_response_length: int = 2000
     ):
         """
         Args:
             llm_config: LLM設定辞書
             response_type: レスポンスタイプ
+            max_response_length: 応答の最大語数
         """
         # LLMを初期化または既存のSettingsから取得
         self.llm = self._get_or_create_llm(llm_config)
         self.response_type = response_type
+        self.max_response_length = max_response_length
     
     def _get_or_create_llm(self, llm_config: Dict[str, Any]):
         """LLMインスタンスを取得または作成"""
         # 既にSettingsにLLMが設定されていればそれを使用
-        if Settings.llm is not None:
-            return Settings.llm
+        configured_llm = get_configured_llm()
+        if configured_llm is not None:
+            return configured_llm
         
         # 設定からLLMを作成
         provider = llm_config.get("provider", "anthropic")
         if provider == "bedrock":
-            return Bedrock(
+            return BedrockConverse(
                 model=llm_config.get("model", "anthropic.claude-3-sonnet-20240229-v1:0"),
                 region_name=llm_config.get("region", "us-east-1")
             )
@@ -86,7 +91,9 @@ class ReduceProcessor:
         
         # システムプロンプトを構築
         system_prompt = REDUCE_SYSTEM_PROMPT.format(
-            response_type=self.response_type
+            max_length=self.max_response_length,
+            response_type=self.response_type,
+            report_data=context
         )
         
         # ユーザープロンプトを構築
@@ -96,16 +103,13 @@ class ReduceProcessor:
         )
         
         # LLMを呼び出して最終回答を生成
-        try:
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ]
-            response = self.llm.chat(messages)
-            final_response = str(response)
-        except Exception as e:
-            logger.error(f"Reduce処理中のLLM呼び出しエラー: {e}")
-            final_response = self._create_fallback_response(top_key_points, query)
+        from llama_index.core.llms import ChatMessage, MessageRole
+
+        messages = [
+            ChatMessage(role=MessageRole.SYSTEM, content=system_prompt),
+            ChatMessage(role=MessageRole.USER, content=user_prompt)
+        ]
+        final_response = str(self.llm.chat(messages))
         
         # トレーサビリティ情報を構築
         traceability = self._build_traceability(all_key_points)
@@ -164,21 +168,6 @@ class ReduceProcessor:
             chunk_ids=list(all_chunk_ids),
             entity_ids=list(all_entity_ids)
         )
-    
-    def _create_fallback_response(self, key_points: List[KeyPoint], query: str) -> str:
-        """LLM呼び出しが失敗した場合のフォールバック応答を作成"""
-        response_lines = []
-        response_lines.append(f"クエリ「{query}」に関する情報:")
-        response_lines.append("")
-        
-        # 重要度順にキーポイントを列挙
-        for i, kp in enumerate(key_points[:10], 1):
-            response_lines.append(f"{i}. {kp.description}")
-        
-        response_lines.append("")
-        response_lines.append("（注：この応答は自動生成されたものです）")
-        
-        return "\n".join(response_lines)
     
     def format_output(
         self,

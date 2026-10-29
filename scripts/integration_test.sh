@@ -6,8 +6,14 @@ echo "==================================================="
 echo "GraphRAG 統合テストスクリプト"
 echo "==================================================="
 
-CONFIG_FILE="config.yaml"
-OUTPUT_DIR=$(grep -E "^output_dir:" $CONFIG_FILE | awk '{print $2}' | tr -d '"' | tr -d '/.')
+CONFIG_FILE="config/config.yaml"
+# output_dir の値から前後の引用符だけを除去する（スラッシュ/ドットは保持）
+OUTPUT_DIR=$(grep -E "^output_dir:" "$CONFIG_FILE" | head -n1 | sed -E 's/^output_dir:[[:space:]]*//; s/^"(.*)"$/\1/; s/^'\''(.*)'\''$/\1/')
+
+if [ -z "$OUTPUT_DIR" ] || [ "$OUTPUT_DIR" = "/" ] || [ "$OUTPUT_DIR" = "." ]; then
+    echo "エラー: output_dir を設定ファイルから取得できませんでした。処理を中止します。"
+    exit 1
+fi
 
 # 1. 既存の出力データをクリーンアップ
 echo "1. 既存の出力データ ($OUTPUT_DIR) をクリーンアップ..."
@@ -20,7 +26,7 @@ echo "クリーンアップ完了。"
 
 # 2. データの追加と処理
 echo -e "\n2. ドキュメントの追加と処理 (add コマンド実行)..."
-poetry run python src/graphrag_anthropic_llamaindex/main.py --config "$CONFIG_FILE" add
+pdm run python -m graphrag_anthropic_llamaindex.main --config "$CONFIG_FILE" add
 if [ $? -ne 0 ]; then
     echo "エラー: ドキュメントの追加処理に失敗しました。"
     exit 1
@@ -36,7 +42,7 @@ TEST_FAILURES=0
 echo -e "\n--- 3.1. メインテキストインデックス検索テスト ---"
 QUERY_MAIN="AIの最新動向について教えてください"
 echo "クエリ: \"$QUERY_MAIN\""
-poetry run python src/graphrag_anthropic_llamaindex/main.py --config "$CONFIG_FILE" search "$QUERY_MAIN" --target-index main
+pdm run python -m graphrag_anthropic_llamaindex.main --config "$CONFIG_FILE" search "$QUERY_MAIN" --mode local
 if [ $? -ne 0 ]; then
     echo "テスト失敗: メインテキストインデックス検索"
     TEST_FAILURES=$((TEST_FAILURES + 1))
@@ -48,7 +54,7 @@ fi
 echo -e "\n--- 3.2. エンティティインデックス検索テスト ---"
 QUERY_ENTITY="Acme CorpのCEOは誰ですか？"
 echo "クエリ: \"$QUERY_ENTITY\""
-poetry run python src/graphrag_anthropic_llamaindex/main.py --config "$CONFIG_FILE" search "$QUERY_ENTITY" --target-index entity
+pdm run python -m graphrag_anthropic_llamaindex.main --config "$CONFIG_FILE" search "$QUERY_ENTITY" --mode local
 if [ $? -ne 0 ]; then
     echo "テスト失敗: エンティティインデックス検索"
     TEST_FAILURES=$((TEST_FAILURES + 1))
@@ -60,7 +66,7 @@ fi
 echo -e "\n--- 3.3. コミュニティ要約インデックス検索テスト ---"
 QUERY_COMMUNITY="サステナブルテクノロジーに関するコミュニティはありますか？"
 echo "クエリ: \"$QUERY_COMMUNITY\""
-poetry run python src/graphrag_anthropic_llamaindex/main.py --config "$CONFIG_FILE" search "$QUERY_COMMUNITY" --target-index community
+pdm run python -m graphrag_anthropic_llamaindex.main --config "$CONFIG_FILE" search "$QUERY_COMMUNITY" --mode global
 if [ $? -ne 0 ]; then
     echo "テスト失敗: コミュニティ要約インデックス検索"
     TEST_FAILURES=$((TEST_FAILURES + 1))
@@ -72,7 +78,7 @@ fi
 echo -e "\n--- 3.4. 全てのインデックス検索テスト ---"
 QUERY_BOTH="気候変動に関する主要な研究機関は？"
 echo "クエリ: \"$QUERY_BOTH\""
-poetry run python src/graphrag_anthropic_llamaindex/main.py --config "$CONFIG_FILE" search "$QUERY_BOTH" --target-index both
+pdm run python -m graphrag_anthropic_llamaindex.main --config "$CONFIG_FILE" search "$QUERY_BOTH" --mode auto
 if [ $? -ne 0 ]; then
     echo "テスト失敗: 全てのインデックス検索"
     TEST_FAILURES=$((TEST_FAILURES + 1))

@@ -10,8 +10,9 @@ import json
 import re
 
 from llama_index.core import Settings
+from graphrag_anthropic_llamaindex.llm_utils import get_configured_llm
 from llama_index.llms.anthropic import Anthropic
-from llama_index.llms.bedrock import Bedrock
+from llama_index.llms.bedrock_converse import BedrockConverse
 
 from .models import MapResult, KeyPoint
 from .prompts import MAP_SYSTEM_PROMPT, MAP_USER_PROMPT
@@ -26,30 +27,34 @@ class MapProcessor:
         self,
         llm_config: Dict[str, Any],
         max_concurrent: int = 5,
-        response_type: str = "multiple paragraphs"
+        response_type: str = "multiple paragraphs",
+        max_response_length: int = 2000
     ):
         """
         Args:
             llm_config: LLM設定辞書
             max_concurrent: 最大同時実行数
             response_type: レスポンスタイプ
+            max_response_length: 応答の最大語数
         """
         # LLMを初期化または既存のSettingsから取得
         self.llm = self._get_or_create_llm(llm_config)
         self.max_concurrent = max_concurrent
         self.response_type = response_type
+        self.max_response_length = max_response_length
         self.semaphore = asyncio.Semaphore(max_concurrent)
     
     def _get_or_create_llm(self, llm_config: Dict[str, Any]):
         """LLMインスタンスを取得または作成"""
         # 既にSettingsにLLMが設定されていればそれを使用
-        if Settings.llm is not None:
-            return Settings.llm
+        configured_llm = get_configured_llm()
+        if configured_llm is not None:
+            return configured_llm
         
         # 設定からLLMを作成
         provider = llm_config.get("provider", "anthropic")
         if provider == "bedrock":
-            return Bedrock(
+            return BedrockConverse(
                 model=llm_config.get("model", "anthropic.claude-3-sonnet-20240229-v1:0"),
                 region_name=llm_config.get("region", "us-east-1")
             )
@@ -112,7 +117,8 @@ class MapProcessor:
             try:
                 # システムプロンプトを構築
                 system_prompt = MAP_SYSTEM_PROMPT.format(
-                    response_type=self.response_type
+                    max_length=self.max_response_length,
+                    context_data=batch["context"]
                 )
                 
                 # ユーザープロンプトを構築
@@ -150,9 +156,12 @@ class MapProcessor:
         loop = asyncio.get_event_loop()
         
         def _sync_call():
+            # Use proper LlamaIndex ChatMessage format for Bedrock compatibility
+            from llama_index.core.llms import ChatMessage, MessageRole
+            
             messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
+                ChatMessage(role=MessageRole.SYSTEM, content=system_prompt),
+                ChatMessage(role=MessageRole.USER, content=user_prompt)
             ]
             response = self.llm.chat(messages)
             return str(response)
@@ -180,32 +189,40 @@ class MapProcessor:
         
         # JSON形式のレスポンスを試みる
         try:
-            # JSONブロックを探す
-            json_match = re.search(r'```json\s*(.*?)\s*```', llm_response, re.DOTALL)
+            # ```json フェンス → 無ければ最初の { ... } ブロック → それも無ければ全文をJSONとして解釈
+            json_match = re.search(r'```(?:json)?\s*(.*?)\s*```', llm_response, re.DOTALL)
             if json_match:
                 json_str = json_match.group(1)
-                data = json.loads(json_str)
-                
-                if isinstance(data, dict) and "key_points" in data:
-                    points = data["key_points"]
-                elif isinstance(data, list):
-                    points = data
-                else:
-                    points = []
-                
-                for point in points:
-                    if isinstance(point, dict):
-                        key_point = KeyPoint(
-                            description=point.get("description", ""),
-                            score=point.get("score", 50),
-                            report_ids=point.get("report_ids", report_ids[:3]),  # 上位3つのレポートIDを使用
-                            source_metadata=self._extract_metadata(records, point.get("report_ids", []))
-                        )
-                        key_points.append(key_point)
             else:
-                # JSON形式でない場合は、段落ごとに処理
+                brace_match = re.search(r'\{.*\}', llm_response, re.DOTALL)
+                json_str = brace_match.group(0) if brace_match else llm_response.strip()
+
+            data = json.loads(json_str)
+
+            # プロンプトは "points"、旧形式/テストは "key_points" を許容
+            if isinstance(data, dict):
+                points = data.get("points", data.get("key_points", []))
+            elif isinstance(data, list):
+                points = data
+            else:
+                points = []
+            if not isinstance(points, list):
+                points = []
+
+            for point in points:
+                if isinstance(point, dict):
+                    key_point = KeyPoint(
+                        description=point.get("description", ""),
+                        score=point.get("score", 50),
+                        report_ids=point.get("report_ids", report_ids[:3]),
+                        source_metadata=self._extract_metadata(records, point.get("report_ids", [])) or {}
+                    )
+                    key_points.append(key_point)
+
+            # JSONは取れたが有効なpointsが無い場合はテキスト抽出にフォールバック
+            if not key_points:
                 key_points = self._extract_from_text(llm_response, report_ids, records)
-                
+
         except json.JSONDecodeError:
             # JSONパースに失敗した場合は、テキスト形式として処理
             key_points = self._extract_from_text(llm_response, report_ids, records)
@@ -239,7 +256,7 @@ class MapProcessor:
                                 description=item.strip(),
                                 score=score,
                                 report_ids=report_ids[:3],
-                                source_metadata=self._extract_metadata(records, report_ids[:3])
+                                source_metadata=self._extract_metadata(records, report_ids[:3]) or {}
                             )
                             key_points.append(key_point)
                 else:
@@ -248,7 +265,7 @@ class MapProcessor:
                         description=paragraph.strip(),
                         score=score,
                         report_ids=report_ids[:3],
-                        source_metadata=self._extract_metadata(records, report_ids[:3])
+                        source_metadata=self._extract_metadata(records, report_ids[:3]) or {}
                     )
                     key_points.append(key_point)
         
