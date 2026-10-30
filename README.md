@@ -11,7 +11,7 @@
 *   **重複排除:** ファイル内容のハッシュ値に基づき、一度処理したファイルの重複追加を防止。
 *   **テキストチャンキング:** ドキュメントをチャンクに分割し、ベクトル検索の粒度を調整（チャンクサイズとオーバーラップを設定可能）。
 *   **エンティティ・リレーションシップ抽出:** LLM（Anthropic Claude）を使用してテキストチャンクからエンティティ（人、組織、場所、概念など）とその関連性を抽出。
-*   **データ永続化:** SQLデータとベクトルインデックスを、同じ組み込みAlopexDBへ保存。外部DBサーバーは不要。
+*   **データ永続化:** SQLデータとベクトルインデックスをAlopexDBへ保存。組み込み構成と、別コンテナのサーバー構成を選択できます。
 *   **コミュニティ検出:** 抽出されたリレーションシップからグラフを構築し、Leiden法を用いてコミュニティを検出。
 *   **コミュニティ要約:** 検出されたコミュニティの内容をLLMで要約し、キーエンティティを抽出。
 *   **ベクトル検索:**
@@ -124,6 +124,25 @@ pdm run python -m graphrag_anthropic_llamaindex.main --config config/config.yaml
 
 ### サーバー構成
 
+まず課金なしで登録・検索の経路を確認する場合は `make server-demo` を実行してください。
+詳細は[再現手順・検証範囲](docs/server-search-demo.md)を参照してください。
+通常の `make server-up` は `docker/config.server.yaml` のLLM設定を使い、登録・検索で外部APIを呼ぶ場合があります。
+
+| 構成 | 起動・実演 | 設定 | 保存先・入口 |
+|---|---|---|---|
+| ローカル組み込み | `bash scripts/demo.sh config/config.yaml` | `config/config.yaml` | 同一プロセスのAlopexDB、CLI |
+| Docker組み込み | `make up` | ルートの `config.yaml` | 同一コンテナのAlopexDB、Gradio :7860 |
+| 通常サーバー | `make server-up` | `docker/config.server.yaml` | 別コンテナのAlopexDB、FastAPI :8000 |
+| 課金なしサーバーデモ | `make server-demo` | `docker/config.demo.yaml` | デモ専用ボリューム、FastAPI :18000 |
+
+`POST /v1/search` の契約は `results: [{score, text, metadata}]` です。
+独立した `/v1/answers` やチャット履歴・ストリーミングAPIはありませんが、
+`SearchModeRouter._retrieve` の内部ではlocalがLLM応答、globalがMap/Reduceの回答を生成します。
+そのため `text` を常に原文チャンク、`score` を常にベクトル類似度として扱うことはできません。
+localの関係データ読み込み・原文text unitsの投入は現状未接続です。
+デモの応答は `[DEMO FIXTURE]` 付きの決定的な模擬出力で、自然言語回答の品質評価とは区別します。
+
+
 サーバー構成は、AlopexDBとLlamaIndex APIを別コンテナで起動し、Docker Composeの内部ネットワークで接続します。クライアントはLlamaIndex APIだけを呼び出します。
 
 ```text
@@ -133,7 +152,7 @@ pdm run python -m graphrag_anthropic_llamaindex.main --config config/config.yaml
 ```bash
 make server-build
 make server-up
-make server-test
+make server-test # 接続と2件のHNSWスモークテスト。文書登録のE2Eではありません
 ```
 
 独立クライアントの使用例:
@@ -182,10 +201,10 @@ pdm run python -m graphrag_anthropic_llamaindex.main --config config/config.yaml
 
 ## デモスクリプトの実行
 
-`scripts/demo.sh` を実行すると、一連のドキュメント追加と検索のデモンストレーションを自動で行います。
+`scripts/demo.sh` は組み込み構成で一連の登録・検索を実行します。全呼び出しで同じ設定ファイルを使います。設定したLLMの利用料金が発生する場合があります。サーバー構成の課金なし実演は `make server-demo` を使用してください。
 
 ```bash
-./scripts/demo.sh
+bash scripts/demo.sh config/config.yaml
 ```
 
 **注意:** 初回実行時は、依存関係のインストール、LLMの呼び出し、埋め込みモデルのダウンロードなどにより、時間がかかる場合があります。また、Anthropic APIキーが`.env`ファイルまたは環境変数に正しく設定されていることを確認してください。

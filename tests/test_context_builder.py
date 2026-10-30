@@ -292,13 +292,13 @@ class TestCommunityContextBuilder:
         mock_response = Mock()
         mock_response.source_nodes = [mock_node1, mock_node2]
         
-        # モッククエリエンジンを設定
-        mock_query_engine = Mock()
-        mock_query_engine.query.return_value = mock_response
+        # モックRetrieverを設定
+        mock_retriever = Mock()
+        mock_retriever.retrieve.return_value = mock_response.source_nodes
         
         # モックインデックスを設定
         mock_index = Mock()
-        mock_index.as_query_engine.return_value = mock_query_engine
+        mock_index.as_retriever.return_value = mock_retriever
         mock_index_class.from_vector_store.return_value = mock_index
         
         builder = CommunityContextBuilder(
@@ -313,6 +313,8 @@ class TestCommunityContextBuilder:
         assert reports[0]["content"] == "Community report 1"
         assert reports[0]["score"] == 0.9
         assert reports[0]["rank"] == 2
+        mock_index.as_query_engine.assert_not_called()
+        mock_retriever.retrieve.assert_called_once_with("test query")
     
     @patch('llama_index.core.VectorStoreIndex')
     def test_retrieve_community_reports_error(

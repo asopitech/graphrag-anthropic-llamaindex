@@ -57,7 +57,11 @@ class GraphRAGService:
         rows = get_database(self.storage_target).execute_sql("SELECT 1 AS ok")
         if rows != [{"ok": 1}]:
             raise RuntimeError(f"Unexpected AlopexDB health response: {rows!r}")
-        return {"status": "ok", "alopexdb": "ok"}
+        result = {"status": "ok", "alopexdb": "ok"}
+        config = load_config(self.config_path)
+        if config and config.get("llm_provider") == "demo":
+            result["runtime"] = "demo-fixture-v1"
+        return result
 
     def add_document(self, request: DocumentRequest) -> dict[str, str]:
         with self._lock:
@@ -77,6 +81,7 @@ class GraphRAGService:
                 self.vector_stores["community"],
                 self.config.get("community_detection", {}),
                 use_archive_reader=True,
+                plain_text_reader=self.config.get("llm_provider") == "demo",
                 file_filter=FileFilter(self.config.get("ignore_patterns", [])),
             )
         return {"status": "indexed", "filename": filename.name}
@@ -123,6 +128,11 @@ class GraphRAGService:
     @staticmethod
     def _configure_settings(config: dict[str, Any]) -> None:
         provider = config.get("llm_provider", "anthropic")
+        if provider == "demo":
+            from .demo_models import configure_demo_settings
+
+            configure_demo_settings()
+            return
         if provider == "claude_code":
             model = config.get("claude_code", {}).get("model", "sonnet")
             Settings.llm = ClaudeCodeLLM(model=model)

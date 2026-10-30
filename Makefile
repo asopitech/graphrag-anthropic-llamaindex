@@ -201,3 +201,15 @@ prod-up: ## 本番環境用起動（ログレベル警告以上）
 	@echo "🏭 本番環境モードで起動中..."
 	@COMPOSE_FILE=$(COMPOSE_FILE) docker compose up -d --remove-orphans
 	@echo "✅ 本番環境で起動完了"
+
+.PHONY: server-demo server-demo-verify server-demo-restart server-demo-down demo-unit-test
+server-demo: ## 課金なしの隔離サーバーデモ（2文書登録・local/global/auto検索）
+	@bash scripts/server_demo.sh run
+server-demo-verify: ## 登録済みデモデータの検索を再検証
+	@bash scripts/server_demo.sh verify
+server-demo-restart: ## デモDB/APIを再起動して永続化を検証
+	@bash scripts/server_demo.sh restart
+server-demo-down: ## デモ専用コンテナを停止（データ保持）
+	@bash scripts/server_demo.sh down
+demo-unit-test: ## 標準ライブラリだけでデモの契約テストを実行
+	@PYTHONPATH=src python3 -m unittest discover -s tests -p test_demo_contract.py -v

@@ -1,0 +1,46 @@
+# Standalone file: no inherited API credentials, Claude home, or production data.
+services:
+  alopexdb:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.alopex-server
+      args:
+        ALOPEX_VERSION: "0.8.16"
+    volumes:
+      - demo-db:/var/lib/alopex
+    networks: [demo]
+  graphrag-server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        APP_UID: ${HOST_UID:-1000}
+        APP_GID: ${HOST_GID:-1000}
+    command: [pdm, run, uvicorn, graphrag_anthropic_llamaindex.server:app, --host, "0.0.0.0", --port, "8000"]
+    depends_on:
+      alopexdb:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:18000:8000"
+    volumes:
+      - demo-input:/app/data
+      - ./config.demo.yaml:/app/config/config.yaml:ro
+    environment:
+      ALOPEX_SERVER_URL: http://alopexdb:8080
+      ALOPEX_SERVER_INSECURE: "true"
+      GRAPHRAG_CONFIG: /app/config/config.yaml
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    networks: [demo]
+    healthcheck:
+      test: [CMD, curl, -f, "http://127.0.0.1:8000/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 10s
+volumes:
+  demo-db:
+  demo-input:
+networks:
+  demo:
+    internal: true

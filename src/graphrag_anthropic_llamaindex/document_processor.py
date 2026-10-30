@@ -59,6 +59,7 @@ def add_documents(
     community_detection_config=None,
     use_archive_reader=True,
     file_filter=None,
+    plain_text_reader=False,
 ):
     """Adds documents from the data directory to the index."""
     print(f"Adding documents from '{input_dir}'...")
@@ -88,6 +89,9 @@ def add_documents(
         ".tsv", ".md", ".rst", ".rtf", ".odt", ".doc", ".docx", ".mermaid", ".plantuml",
         ".ppt", ".pptx", ".pdf", ".png", ".jpg", ".jpeg", ".heic", ".epub",
     ]
+    if plain_text_reader:
+        # SimpleDirectoryReader reads .txt directly, without NLP model downloads.
+        unstructured_supported_exts.remove(".txt")
     file_extractor = {ext: UnstructuredReader() for ext in unstructured_supported_exts}
     
     # Load documents with unified processing logic
