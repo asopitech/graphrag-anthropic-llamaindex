@@ -188,3 +188,11 @@ python gradio_app.py
 - 処理結果は`graphrag_output/`に保存されます
 - APIキーは環境変数で安全に管理されます
 - コンテナは自動的にヘルスチェックを実行します
+
+## 課金なしのサーバー検索デモ
+
+リポジトリルートで `make server-demo` を実行します。
+`docker-compose.demo.yml` は独立したCompose構成で、通常環境の認証情報やデータを引き継ぎません。
+LLMと埋め込みをローカルの固定ルール実装に置き換え、AlopexDBとFastAPIは実際のサーバー経路を使います。
+ビルド時にはパッケージ・バイナリ取得用のネットワークが必要です。
+[再現手順と未検証部分](../docs/server-search-demo.md)を参照してください。

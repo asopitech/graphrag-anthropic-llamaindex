@@ -1,0 +1,9 @@
+# Synthetic fixtures: exercise plumbing, not semantic retrieval quality.
+llm_provider: demo
+input_dir: /app/data
+community_detection:
+  max_cluster_size: 10
+  use_lcc: true
+  seed: 42
+entity_extraction:
+  enabled: true

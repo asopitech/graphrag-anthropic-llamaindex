@@ -115,17 +115,11 @@ class CommunityContextBuilder:
             # インデックスを作成または取得
             index = VectorStoreIndex.from_vector_store(self.vector_store)
             
-            # クエリエンジンを作成
-            query_engine = index.as_query_engine(
-                similarity_top_k=50  # 上位50件のコミュニティレポートを取得
-            )
-            
-            # 検索実行
-            response = query_engine.query(query)
-            
-            # レスポンスから情報を抽出
+            # Only source nodes are needed here; synthesis happens in Map/Reduce.
+            nodes = index.as_retriever(similarity_top_k=50).retrieve(query)
+
             reports = []
-            for node in response.source_nodes:
+            for node in nodes:
                 report = {
                     "id": node.node.id_,
                     "content": node.node.text,
